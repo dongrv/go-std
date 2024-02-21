@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// 时间轮最小实现
-
 const Unit = 100 * time.Millisecond // 单位
 
 type Segment int64 // 时间片类型
@@ -80,7 +78,7 @@ type Timewheel struct {
 	state        atomic.Int32          // 状态
 	Offset       int64                 // 偏移量
 	buckets      map[Segment][]Wheeler // 轮子集合
-	nameSeg      map[string]Segment    // 名称映射时间段
+	nameSeg      map[string][]Segment  // 名称映射时间段
 	BaseTimeline time.Duration         // 时间基线
 	Ticker       *time.Ticker          // 定时器
 }
@@ -88,7 +86,7 @@ type Timewheel struct {
 func NewTimewheel() *Timewheel {
 	tw := &Timewheel{
 		buckets:      make(map[Segment][]Wheeler, 1<<10),
-		nameSeg:      make(map[string]Segment, 1<<10),
+		nameSeg:      make(map[string][]Segment, 1<<10),
 		BaseTimeline: UnixMilli() / Unit * Unit,
 		Ticker:       time.NewTicker(Unit),
 	}
@@ -103,12 +101,13 @@ func (tw *Timewheel) Add(w Wheeler) (Segment, error) {
 	defer tw.mu.Unlock()
 	if _, ok := tw.buckets[seg]; !ok {
 		tw.buckets[seg] = make([]Wheeler, 0, 1<<8)
+		tw.nameSeg[w.Called()] = make([]Segment, 0, 1<<8)
 	}
 	if len(tw.buckets[seg]) == cap(tw.buckets[seg]) {
 		return seg, errors.New("current segment list in buckets is full")
 	}
 	tw.buckets[seg] = append(tw.buckets[seg], w)
-	tw.nameSeg[w.Called()] = seg
+	tw.nameSeg[w.Called()] = append(tw.nameSeg[w.Called()], seg)
 	return seg, nil
 }
 
@@ -116,17 +115,18 @@ func (tw *Timewheel) Add(w Wheeler) (Segment, error) {
 func (tw *Timewheel) Remove(name string) {
 	tw.mu.Lock()
 	defer tw.mu.Unlock()
-	seg, ok := tw.nameSeg[name]
+	segs, ok := tw.nameSeg[name]
 	if !ok {
 		return
 	}
-	for i, wheel := range tw.buckets[seg] {
-		if wheel.Called() == name {
-			buf := make([]Wheeler, len(tw.buckets[seg])-1)
-			copy(buf[:i], tw.buckets[seg][:i])
-			copy(buf[i:], tw.buckets[seg][i+1:])
-			tw.buckets[seg] = buf
-			break
+	for _, seg := range segs {
+		for i, wheel := range tw.buckets[seg] {
+			if wheel.Called() == name {
+				buf := make([]Wheeler, len(tw.buckets[seg])-1)
+				copy(buf[:i], tw.buckets[seg][:i])
+				copy(buf[i:], tw.buckets[seg][i+1:])
+				tw.buckets[seg] = buf
+			}
 		}
 	}
 	delete(tw.nameSeg, name)
@@ -145,7 +145,7 @@ func (tw *Timewheel) Replay(from, to Segment) {
 	defer tw.mu.Unlock()
 
 	replay := make([]Segment, 0, 1<<8)
-	for _, segment := range tw.nameSeg {
+	for segment := range tw.buckets {
 		if segment >= from && segment <= to {
 			replay = append(replay, segment)
 		}
