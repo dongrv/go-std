@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// 时间轮最小化实现
+
 const Unit = 100 * time.Millisecond // 单位
 
 type Segment int64 // 时间片类型
