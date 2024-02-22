@@ -3,9 +3,10 @@ package toolkit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,13 +46,13 @@ func (p *Processor) Read(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Debug("read context exit")
+			_, _ = fmt.Fprint(os.Stderr, "read context exit")
 			return
 		default:
 			header := make([]byte, p.Frame.header)
 			_, err := io.ReadFull(p.Conn, header)
 			if err != nil {
-				slog.Error("read conn err:", err.Error())
+				_, _ = fmt.Fprintf(os.Stderr, "read conn err:%s", err.Error())
 				return
 			}
 		}
